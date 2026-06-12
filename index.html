@@ -36,7 +36,7 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- 左侧输入区 -->
+        <!-- 左侧输入区（不变） -->
         <div class="lg:col-span-1 space-y-6">
             <div class="card">
                 <h2 class="text-xl font-bold text-gray-800 mb-4">1. 发货与成本</h2>
@@ -73,7 +73,7 @@
                             <option value="淘宝">淘宝</option>
                         </select>
                     </div>
-                    <div><label class="text-sm font-bold">套餐定价 (元)</label><input type="number" id="price" class="input-field" value="29"></div>
+                    <div><label class="text-sm font-bold">套餐定价 (元)</label><input type="number" id="price" class="input-field" value="59"></div>
                 </div>
                 <div class="grid grid-cols-2 gap-3 mb-3">
                     <div><label class="text-sm font-bold">套餐用量 (GB)</label><input type="number" id="data_gb" class="input-field" value="100"></div>
@@ -95,10 +95,10 @@
                     <input type="number" id="firstChargeRate" class="input-field" value="85">
                 </div>
                 <div id="manualInputArea" style="display:none;" class="manual-input-area">
-                    <label class="text-sm font-bold">📝 手动输入复充率（17个，逗号分隔）</label>
+                    <label class="text-sm font-bold">📝 手动输入复充率（17个，逗号分隔，对应第2~18月）</label>
                     <input type="text" id="manualRates" class="input-field mt-1" placeholder="1.0,0.72,...">
-                    <label class="text-sm font-bold mt-2">📝 手动输入流量成本（17个，元/台，逗号分隔）</label>
-                    <input type="text" id="manualCosts" class="input-field mt-1" placeholder="0,1.2,1.5,...">
+                    <label class="text-sm font-bold mt-2">📝 手动输入流量成本（17个，元/台，逗号分隔，对应第2~18月）</label>
+                    <input type="text" id="manualCosts" class="input-field mt-1" placeholder="1.2,1.3,1.5,...">
                 </div>
             </div>
 
@@ -141,10 +141,24 @@
                 <div class="metric-card"><div class="text-sm">累计现金流</div><div class="metric-value" id="cumulativeCash">-</div><div class="text-xs">万元</div></div>
             </div>
             <div class="card"><h3 class="text-lg font-bold mb-4">现金流趋势</h3><canvas id="cashFlowChart" height="100"></canvas></div>
-            <div class="card overflow-x-auto"><h3 class="text-lg font-bold mb-4">月度明细</h3>
-                <table class="min-w-full text-sm"><thead class="bg-gray-50"><tr><th>月份</th><th>活跃用户</th><th>收入(万)</th><th>支出(万)</th><th>利润(万)</th><th>累计(万)</th></tr></thead><tbody id="resultTableBody"></tbody>{" "}
-                <p class="text-xs text-gray-500 mt-2">注：首月支出包含硬件净成本+固定成本+流量成本；第2月起支出仅含流量成本。</p>
+            <div class="card overflow-x-auto">
+                <h3 class="text-lg font-bold mb-4">月度明细</h3>
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50">
+                        <tr><th class="table-cell">月份</th><th class="table-cell">活跃用户</th><th class="table-cell">收入(万)</th><th class="table-cell">支出(万)</th><th class="table-cell">利润(万)</th><th class="table-cell">累计(万)</th></tr>
+                    </thead>
+                    <tbody id="resultTableBody"></tbody>
+                </table>
+                <p class="text-xs text-gray-500 mt-2">注：首月支出包含硬件净成本+固定成本+首月流量成本；第2月起支出仅含流量成本。</p>
             </div>
+            <!-- AI 建议卡片（确保在表格下方） -->
+            <div class="card bg-gray-800 text-white">
+                <h3 class="text-lg font-bold mb-2">💡 AI 建议</h3>
+                <ul class="list-disc list-inside text-sm space-y-2" id="aiAdvice">
+                    <li>点击“开始测算”生成建议</li>
+                </ul>
+            </div>
+            <!-- AI 对话卡片 -->
             <div class="card">
                 <h3 class="text-lg font-bold mb-2">🤖 AI 智能顾问</h3>
                 <div id="chatContainer" class="h-80 overflow-y-auto border rounded-lg p-3 mb-3 bg-gray-50">
@@ -167,7 +181,7 @@
     let packageLibrary = [];
     let chatMessages = [];
 
-    // ========== 加载套餐库 ==========
+    // ========== 加载套餐库（修正示例数据：流量成本序列第一个值非零） ==========
     async function loadPackageLibrary() {
         try {
             const resp = await fetch('package_library.json');
@@ -177,19 +191,20 @@
                 return;
             }
         } catch(e) {}
+        // 内置示例数据（修正：avg_monthly_cost 第一个值对应第2月，非零）
         packageLibrary = [
             { platform:"抖音", price:29, data_gb:100, type:"月包", category:"主套餐", period_days:30,
               repurchase_rate: [1.0,0.72,0.58,0.49,0.43,0.38,0.34,0.31,0.28,0.26,0.24,0.22,0.20,0.19,0.18,0.17,0.16],
-              avg_monthly_cost: [0,1.2,1.3,1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8],
-              early_avg_cost: 1.2 },
+              avg_monthly_cost: [1.2,1.3,1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9],
+              early_avg_cost: (1.2+1.3+1.5+1.6+1.7)/5 },
             { platform:"抖音", price:49, data_gb:200, type:"月包", category:"主套餐", period_days:30,
               repurchase_rate: [1.0,0.68,0.55,0.47,0.42,0.37,0.33,0.30,0.27,0.25,0.23,0.21,0.19,0.18,0.17,0.16,0.15],
-              avg_monthly_cost: [0,1.1,1.2,1.4,1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.6,2.7],
-              early_avg_cost: 1.1 },
+              avg_monthly_cost: [1.1,1.2,1.4,1.5,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8],
+              early_avg_cost: (1.1+1.2+1.4+1.5+1.6)/5 },
             { platform:"淘宝", price:29, data_gb:100, type:"月包", category:"主套餐", period_days:30,
               repurchase_rate: [1.0,0.70,0.56,0.48,0.42,0.37,0.33,0.30,0.27,0.25,0.23,0.21,0.19,0.18,0.17,0.16,0.15],
-              avg_monthly_cost: [0,1.3,1.4,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9],
-              early_avg_cost: 1.3 }
+              avg_monthly_cost: [1.3,1.4,1.6,1.7,1.8,1.9,2.0,2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9,3.0],
+              early_avg_cost: (1.3+1.4+1.6+1.7+1.8)/5 }
         ];
     }
 
@@ -221,7 +236,7 @@
         }
         document.getElementById('manualInputArea').style.display = 'none';
         
-        let sameGroup = candidates.find(p => p.platform === target.platform && p.price === target.price && p.data_gb === target.data_gb && p.type === target.type && p.category === target.category && p.period_days === target.period_days);
+        let sameGroup = candidates.find(p => p.price === target.price && p.data_gb === target.data_gb && p.category === target.category && p.period_days === target.period_days);
         let early_avg = sameGroup && sameGroup.early_avg_cost !== undefined ? sameGroup.early_avg_cost : 0;
         const targetVec = getVector(target, early_avg);
         const weights = [1.0, 0.8, 0.5, 1.0, 0.3, 0.3, 0.2, 0.2, 0.2, 1.2, 1.5];
@@ -295,6 +310,7 @@
         }
 
         const months = parseInt(document.getElementById('forecastMonths').value) || 18;
+        // 截取前 months-1 个（第2~18月）
         let repRates = repurchaseRates.slice(0, months-1);
         if (repRates.length < months-1) repRates.push(...new Array(months-1 - repRates.length).fill(0));
         let trafficSeq = trafficCosts.slice(0, months-1);
@@ -332,7 +348,7 @@
                 expense[i] = hardwareNetCost + monthlyFixedCost + trafficTotal;
             } else {
                 trafficTotal = activeUsers[i] * (trafficSeq[i-1] || 0);
-                expense[i] = trafficTotal;   // 后续月份仅流量成本
+                expense[i] = trafficTotal;
             }
         }
 
@@ -416,9 +432,16 @@
             },
             options: { responsive: true }
         });
+        // 更新AI建议（简单规则）
+        const advice = [];
+        if (data.payback_months > 12) advice.push("⚠️ 回本周期超过12个月，建议优化推广策略或降低成本。");
+        if (data.roi < 30) advice.push("📉 ROI偏低，需提升用户复充率或提高套餐定价。");
+        if (data.max_monthly_loss < -50000) advice.push("💰 前几月亏损较大，可考虑减少初期发货量或降低硬件成本。");
+        if (advice.length === 0) advice.push("✅ 财务指标良好，建议持续监控复充率和流量成本变化。");
+        document.getElementById('aiAdvice').innerHTML = advice.map(a => `<li>${a}</li>`).join('');
     }
 
-    // ========== AI 聊天（保持原样） ==========
+    // ========== AI 聊天（保持不变） ==========
     function formatFinancialContext(result) {
         if (!result) return "暂无财务数据。";
         let text = `当前财务测算结果：\n- 回本周期：${result.payback_months}个月\n- ROI：${result.roi.toFixed(1)}%\n- 累计现金流：${(result.cumulative_cash/10000).toFixed(2)}万元\n- 最大单月亏损：${result.max_monthly_loss.toFixed(0)}元\n\n月度明细（元）：\n月份\t活跃用户\t收入\t支出\t利润\t累计\n`;
