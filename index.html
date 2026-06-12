@@ -96,9 +96,10 @@
                 </div>
                 <div id="manualInputArea" style="display:none;" class="manual-input-area">
                     <label class="text-sm font-bold">📝 手动输入复充率（17个，逗号分隔，对应第2~18月）</label>
-                    <input type="text" id="manualRates" class="input-field mt-1" placeholder="1.0,0.72,...">
+                    <input type="text" id="manualRates" class="input-field mt-1" placeholder="例：1.0,0.72,0.58,...">
                     <label class="text-sm font-bold mt-2">📝 手动输入流量成本（17个，元/台，逗号分隔，对应第2~18月）</label>
-                    <input type="text" id="manualCosts" class="input-field mt-1" placeholder="1.2,1.3,1.5,...">
+                    <input type="text" id="manualCosts" class="input-field mt-1" placeholder="例：1.2,1.3,1.5,...">
+                    <p class="text-xs text-gray-500 mt-1">手动输入后需再次点击“开始测算”。</p>
                 </div>
             </div>
 
@@ -151,14 +152,12 @@
                 </table>
                 <p class="text-xs text-gray-500 mt-2">注：首月支出包含硬件净成本+固定成本+首月流量成本；第2月起支出仅含流量成本。</p>
             </div>
-            <!-- AI 建议卡片（确保在表格下方） -->
             <div class="card bg-gray-800 text-white">
                 <h3 class="text-lg font-bold mb-2">💡 AI 建议</h3>
                 <ul class="list-disc list-inside text-sm space-y-2" id="aiAdvice">
                     <li>点击“开始测算”生成建议</li>
                 </ul>
             </div>
-            <!-- AI 对话卡片 -->
             <div class="card">
                 <h3 class="text-lg font-bold mb-2">🤖 AI 智能顾问</h3>
                 <div id="chatContainer" class="h-80 overflow-y-auto border rounded-lg p-3 mb-3 bg-gray-50">
@@ -181,7 +180,7 @@
     let packageLibrary = [];
     let chatMessages = [];
 
-    // ========== 加载套餐库（修正示例数据：流量成本序列第一个值非零） ==========
+    // ========== 加载套餐库 ==========
     async function loadPackageLibrary() {
         try {
             const resp = await fetch('package_library.json');
@@ -191,7 +190,7 @@
                 return;
             }
         } catch(e) {}
-        // 内置示例数据（修正：avg_monthly_cost 第一个值对应第2月，非零）
+        // 内置示例数据（确保非零）
         packageLibrary = [
             { platform:"抖音", price:29, data_gb:100, type:"月包", category:"主套餐", period_days:30,
               repurchase_rate: [1.0,0.72,0.58,0.49,0.43,0.38,0.34,0.31,0.28,0.26,0.24,0.22,0.20,0.19,0.18,0.17,0.16],
@@ -231,11 +230,8 @@
     function predictRepurchaseAndCost(target) {
         let candidates = packageLibrary.filter(p => p.platform === target.platform && p.type === target.type);
         if (candidates.length === 0) {
-            document.getElementById('manualInputArea').style.display = 'block';
-            return { repurchase_rate: null, avg_monthly_cost: null };
+            return { repurchase_rate: null, avg_monthly_cost: null, reason: "无匹配套餐" };
         }
-        document.getElementById('manualInputArea').style.display = 'none';
-        
         let sameGroup = candidates.find(p => p.price === target.price && p.data_gb === target.data_gb && p.category === target.category && p.period_days === target.period_days);
         let early_avg = sameGroup && sameGroup.early_avg_cost !== undefined ? sameGroup.early_avg_cost : 0;
         const targetVec = getVector(target, early_avg);
@@ -278,7 +274,15 @@
             finalRate[t] /= ks.length;
             finalCost[t] /= ks.length;
         }
-        return { repurchase_rate: finalRate, avg_monthly_cost: finalCost };
+        return { repurchase_rate: finalRate, avg_monthly_cost: finalCost, reason: "ok" };
+    }
+
+    // 检查序列是否有效（非空、长度17、不全为0）
+    function isValidSeq(seq) {
+        if (!seq || seq.length !== 17) return false;
+        // 至少有一个正值，且平均值>0.01
+        let sum = seq.reduce((a,b) => a + (b||0), 0);
+        return sum > 0.01;
     }
 
     function parseManualSeq(str) {
@@ -288,7 +292,7 @@
         return parts;
     }
 
-    // ========== 财务计算（首月后只计流量成本） ==========
+    // ========== 财务计算（增强容错） ==========
     async function calculateAndPredict() {
         const target = {
             platform: document.getElementById('platform').value,
@@ -298,19 +302,41 @@
             category: document.getElementById('category').value,
             period_days: parseFloat(document.getElementById('period_days').value)
         };
-        let pred = predictRepurchaseAndCost(target);
+
+        // 优先使用手动输入（如果已填写且有效）
         let manualRates = parseManualSeq(document.getElementById('manualRates').value);
         let manualCosts = parseManualSeq(document.getElementById('manualCosts').value);
-        let repurchaseRates = manualRates || pred.repurchase_rate;
-        let trafficCosts = manualCosts || pred.avg_monthly_cost;
+        let repurchaseRates = manualRates;
+        let trafficCosts = manualCosts;
+        let useManual = false;
+
         if (!repurchaseRates || !trafficCosts) {
-            alert("未找到相似套餐，请手动输入复充率和流量成本序列（17个数字）。");
-            document.getElementById('manualInputArea').style.display = 'block';
-            return;
+            // 手动输入无效，尝试预测
+            let pred = predictRepurchaseAndCost(target);
+            if (pred.repurchase_rate && isValidSeq(pred.repurchase_rate)) {
+                repurchaseRates = pred.repurchase_rate;
+            } else {
+                repurchaseRates = null;
+            }
+            if (pred.avg_monthly_cost && isValidSeq(pred.avg_monthly_cost)) {
+                trafficCosts = pred.avg_monthly_cost;
+            } else {
+                trafficCosts = null;
+            }
+            // 如果预测也无效，则要求手动输入
+            if (!repurchaseRates || !trafficCosts) {
+                document.getElementById('manualInputArea').style.display = 'block';
+                alert("未能从套餐库匹配到有效的复充率和流量成本数据，请手动输入17个月序列后重试。");
+                return;
+            }
+        } else {
+            useManual = true;
         }
 
+        // 隐藏手动区域（如果之前显示）
+        document.getElementById('manualInputArea').style.display = 'none';
+
         const months = parseInt(document.getElementById('forecastMonths').value) || 18;
-        // 截取前 months-1 个（第2~18月）
         let repRates = repurchaseRates.slice(0, months-1);
         if (repRates.length < months-1) repRates.push(...new Array(months-1 - repRates.length).fill(0));
         let trafficSeq = trafficCosts.slice(0, months-1);
@@ -432,7 +458,7 @@
             },
             options: { responsive: true }
         });
-        // 更新AI建议（简单规则）
+        // AI建议
         const advice = [];
         if (data.payback_months > 12) advice.push("⚠️ 回本周期超过12个月，建议优化推广策略或降低成本。");
         if (data.roi < 30) advice.push("📉 ROI偏低，需提升用户复充率或提高套餐定价。");
